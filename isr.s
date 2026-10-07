@@ -23,10 +23,20 @@ interrupt_common:
     sub esp, 12
     push ebx
     call interrupt_dispatch
-    mov esp, ebx
+    mov esp, eax               ; C selects the next task interrupt frame
     popa
     add esp, 8
     iretd
+global scheduler_task_start
+extern scheduler_task_entry
+scheduler_task_start:
+    xor ebp, ebp
+    call scheduler_task_entry  ; New task ESP is 16-byte aligned before CALL.
+.halt:
+    cli
+    hlt
+    jmp .halt
+
 section .rodata
 global isr_table
 isr_table:

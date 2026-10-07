@@ -7,4 +7,5 @@ void kprint(const char *s);
 void kprint_uint(uint32_t value);
 void kprint_hex(uint32_t value);
 void vga_ticks(uint32_t ticks);
+void vga_task(uint32_t task, uint32_t switches);
 #endif

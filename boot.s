@@ -27,6 +27,8 @@ extern kernel_main
 kernel_entry:
     cli
     cld
+    mov edi, eax                 ; Multiboot magic
+    mov esi, ebx                 ; Multiboot information pointer
     lgdt [gdt_ptr]
     jmp 0x08:.segments
 .segments:
@@ -38,6 +40,9 @@ kernel_entry:
     mov ss, ax
     mov esp, stack_top
     xor ebp, ebp
+    sub esp, 8
+    push esi
+    push edi
     call kernel_main
 .halt:
     cli

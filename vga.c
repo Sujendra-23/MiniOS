@@ -47,3 +47,20 @@ void kprint_hex(uint32_t value) {
     for (int shift = 28; shift >= 0; shift -= 4)
         kputc(digits[(value >> shift) & 0xF]);
 }
+
+static void status_uint(unsigned *col, uint32_t value) {
+    char digits[10];
+    unsigned n = 0;
+    do { digits[n++] = '0' + value % 10; value /= 10; } while (value);
+    while (n) cell(24 * 80 + (*col)++, digits[--n]);
+}
+void vga_task(uint32_t task, uint32_t switches) {
+    unsigned col = 40;
+    const char *label = "task: ";
+    while (*label) cell(24 * 80 + col++, *label++);
+    status_uint(&col, task);
+    label = " | switches: ";
+    while (*label) cell(24 * 80 + col++, *label++);
+    status_uint(&col, switches);
+    while (col < 80) cell(24 * 80 + col++, ' ');
+}

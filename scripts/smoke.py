@@ -57,23 +57,35 @@ def run_case(fault_key, vector, error, page_fault=None):
             command("qmp_capabilities")
             wait_for(lambda: "READY:" in output(), "kernel boot", process)
             assert "PAGING:" in output(), "Paging initialization missing"
+            assert "PAGING MAP TEST: PASS" in output(), "Dynamic map/unmap failed"
+            assert re.search(r"FRAMES: free=[1-9][0-9]*", output()), "No free RAM frames"
             registers = monitor("info registers")
             match = re.search(r"CR0=([0-9a-fA-F]+)", registers)
             assert match and int(match[1], 16) & 0x80010000 == 0x80010000, "PG/WP disabled"
             match = re.search(r"CR3=([0-9a-fA-F]+)", registers)
             assert match and int(match[1], 16) != 0 and int(match[1], 16) % 4096 == 0, "Invalid CR3"
             wait_for(lambda: "TICK 300\n" in output(), "three seconds of PIT IRQs", process)
+            # CPU-bound workers never yield; all must progress through PIT preemption.
+            pattern = r"SCHED ticks=(\d+) switches=(\d+) workers=(\d+),(\d+),(\d+)\n"
+            wait_for(lambda: len(re.findall(pattern, output())) >= 3,
+                     "preemptive worker progress", process)
+            snapshots = [tuple(map(int, entry)) for entry in re.findall(pattern, output())]
+            first, last = snapshots[0], snapshots[-1]
+            assert last[1] > first[1] > 0, "No repeated context switches"
+            assert all(b > a > 0 for a, b in zip(first[2:], last[2:])), "A worker starved"
+            assert "PANIC:" not in output(), "Task context corrupted"
             # Send one key at a time to preserve order and verify actual IRQ1 echo.
             for key in ("a", "b", "c", "ret"):
                 monitor("sendkey " + key)
                 time.sleep(0.15)
-            wait_for(lambda: "abc\n" in re.sub(r"TICK [0-9]+\n", "", output()), "keyboard echo", process)
+            wait_for(lambda: "abc\n" in re.sub(r"(?:TICK [0-9]+|SCHED ticks=[^\n]+)\n", "", output()), "keyboard echo", process)
             # Verify the text really reached VGA, including the timer status row.
             dump = root / "vga.bin"
             command("pmemsave", {"val": 0xB8000, "size": 4000, "filename": str(dump)})
             text = dump.read_bytes()[::2].decode("latin1")
             assert "abc" in text, "Keyboard output missing from VGA"
             assert re.search(r"PIT 100 Hz \| ticks: [1-9][0-9]+", text), "No VGA ticks"
+            assert re.search(r"task: [0-3] \| switches: [1-9][0-9]*", text), "No VGA scheduler status"
             monitor("sendkey " + fault_key)
             expected = f"EXCEPTION vector={vector} error={error} eip="
             wait_for(lambda: expected in output(), "exception diagnostic", process)
@@ -91,7 +103,7 @@ def run_case(fault_key, vector, error, page_fault=None):
             assert output() == before, "Kernel did not halt after exception"
             assert output().count("MiniOS: booting...") == 1, "Kernel rebooted"
             assert command("query-status")["status"] == "running", "CPU triple-faulted"
-            print(f"PASS: ISO boot, paging PG/WP, PIT, keyboard, VGA, exception {vector} (error {error})")
+            print(f"PASS: ISO boot, paging/map/unmap, preemption, PIT, keyboard, VGA, exception {vector} (error {error})")
         except Exception:
             print(output())
             raise

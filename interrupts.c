@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include "io.h"
 #include "kprint.h"
+#include "interrupts.h"
+#include "scheduler.h"
 struct idt_gate {
     uint16_t low, selector;
     uint8_t zero, flags;
@@ -10,10 +12,6 @@ struct idt_pointer {
     uint16_t limit;
     uint32_t base;
 } __attribute__((packed));
-struct interrupt_frame {
-    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
-    uint32_t vector, error, eip, cs, eflags;
-};
 static struct idt_gate idt[256];
 extern void (*isr_table[48])(void);
 extern void keyboard_handler_c(void);
@@ -50,7 +48,8 @@ void interrupts_init(void) {
     pic_write(0x21, 0xFC); /* IRQ0 and IRQ1 only */
     pic_write(0xA1, 0xFF);
 }
-void interrupt_dispatch(struct interrupt_frame *frame) {
+struct interrupt_frame *interrupt_dispatch(struct interrupt_frame *frame) {
+    uint32_t vector = frame->vector;
     if (frame->vector < 32) {
         /* Capture CR2 before printing, so diagnostics cannot overwrite it. */
         uint32_t fault_address = 0;
@@ -87,9 +86,11 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
             while (n) outb(0xE9, digits[--n]);
             outb(0xE9, '\n');
         }
+        frame = scheduler_tick(frame, ticks);
     } else if (frame->vector == 33) {
         keyboard_handler_c();
     }
-    if (frame->vector >= 40) outb(0xA0, 0x20);
+    if (vector >= 40) outb(0xA0, 0x20);
     outb(0x20, 0x20);
+    return frame;
 }

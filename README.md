@@ -6,7 +6,21 @@ and enables only PIT timer (IRQ0) and PS/2 keyboard (IRQ1) interrupts.
 It enables 32-bit paging with 4 KiB supervisor pages: addresses below 4 MiB
 are identity-mapped, except page zero. Kernel code and constants are read-only;
 CR0 write protection enforces this in ring 0. A linker check keeps the kernel,
-its stack, and page tables inside the mapped window.
+its boot stack, and static page tables inside the mapped window.
+
+A bitmap frame allocator reads GRUB's Multiboot memory map, reserves firmware,
+kernel, and boot-module memory, and manages available RAM up to 128 MiB. Two-level
+paging can map and unmap additional supervisor pages; empty dynamic page tables
+are released. Page-table frames come from the low identity window so the kernel
+can access them directly.
+
+PIT IRQ0 drives a round-robin preemptive scheduler with a 100 ms quantum.
+The boot context is task 0; three CPU-bound ring-0 workers occupy tasks 1–3.
+Each worker has an 8 KiB stack backed by allocated frames and an unmapped guard
+page. The assembly interrupt wrapper restores the interrupt frame selected by
+the scheduler. Workers never yield or sleep, so progress in all three requires
+timer preemption. A private stack marker checks that their contexts stay intact.
+The bottom VGA row shows ticks, the current task, and context switches.
 
 The PIT runs at approximately 100 Hz. A tick counter stays on the bottom VGA
 row while the text console scrolls above it. Basic unshifted US keyboard input,
@@ -49,14 +63,21 @@ qemu-system-i386 -cdrom os.iso -debugcon stdio -no-reboot -no-shutdown
 
 ## Verification
 
-`make smoke` boots the actual GRUB ISO under QEMU TCG, waits for 300 timer
-ticks, injects PS/2 keys through QMP, reads VGA memory to confirm keyboard echo
+`make test` runs the native C frame-allocator unit tests: reservations, partial
+page alignment, duplicate availability ranges, exhaustion, unique allocation,
+free/reuse, double-free rejection, address limits, and every bitmap word.
+
+`make smoke` runs those unit tests, then boots the actual GRUB ISO under QEMU
+TCG, waits for 300 timer ticks, injects PS/2 keys through QMP, reads VGA memory to confirm keyboard echo
 and the timer display, and verifies the kernel halts cleanly on exceptions.
 Five boots verify paging is enabled with write protection, exercise both
 exception stack layouts (invalid opcode and general protection), and check
 three real page faults: an unmapped read, a null read, and a protected-code
 write. Tests confirm vector 14, error codes 0/3, CR2, and VGA diagnostics while
-also verifying timer and keyboard IRQs work with paging enabled.
+also verifying timer and keyboard IRQs work with paging enabled. It checks that
+all three CPU-bound worker counters increase across scheduler snapshots and that
+context switches keep occurring. Boot also performs a dynamic page-map/write/
+read/unmap self-test and checks the allocator's free-frame count is restored.
 QEMU debug port 0xE9 mirrors console output and emits timer progress.
 The GitHub Actions workflow runs the same build and test and uploads the ISO
 and ELF as artifacts.
@@ -80,20 +101,25 @@ break *interrupt_dispatch
 continue
 set $irq_frame = *(struct interrupt_frame **)($esp + 4)
 print *$irq_frame
+print current
+print switches
+print tasks[1].work
 ```
 
 At function entry, the commands above read the interrupt frame from the C
 argument on the stack, even when GDB reports the named argument unavailable.
-Use `x/16hx 0xb8000` to
-inspect VGA memory. Docker users can run QEMU and GDB inside the same tools
+Use `x/16hx 0xb8000` to inspect VGA memory. Docker users can run QEMU and GDB inside the same tools
 container.
 
 ## Scope
 
-This is a single-core ring-0 teaching kernel with a fixed identity map.
-Memory above 4 MiB, dynamic allocation, demand paging, user processes, a
-filesystem, and a full keyboard driver are not implemented. Page faults print
-diagnostics and halt; they do not allocate pages or resume the faulting code.
+This is a single-core ring-0 teaching kernel. Tasks share one address space;
+there are no user-mode processes, per-process page directories, demand paging,
+filesystem, or full keyboard driver. Physical-frame allocation is capped at
+128 MiB, and page-table frames must fit in the low 4 MiB identity window.
+Task creation and memory-management calls run with interrupts disabled. A task
+that returns stops running; its stack remains reserved until reboot. Page faults
+print diagnostics and halt rather than allocating pages or resuming the code.
 
 Paging follows the two-level 32-bit paging and page-fault rules in the
 [Intel system programming manual](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-system-programming-manual-325384.pdf).
