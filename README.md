@@ -43,7 +43,9 @@ make run
 ```
 
 Outputs: `build/kernel.elf` (with debug symbols) and `os.iso`.
-Close the QEMU window to exit. `make clean` removes generated artifacts.
+The ISO explicitly uses GRUB's i386-pc (BIOS) modules so hosts with extra EFI
+packages produce the same boot image. Override GRUB_DIR if these modules are
+installed elsewhere. Close the QEMU window to exit. `make clean` removes generated artifacts.
 
 ## Build and test on macOS with Docker
 
