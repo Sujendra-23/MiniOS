@@ -1,0 +1,27 @@
+name: Build and boot MiniOS
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and emulator tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib make nasm grub-pc-bin grub-common xorriso qemu-system-x86 python3
+      - name: Build GRUB ISO
+        run: make
+      - name: Exercise boot, timer, keyboard, VGA, and exceptions
+        run: make smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minios
+          path: |
+            os.iso
+            build/kernel.elf

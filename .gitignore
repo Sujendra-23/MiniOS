@@ -1,0 +1,10 @@
+build/
+iso/
+os.iso
+*.o
+*.elf
+.vscode/
+.rocketride/
+.env
+__pycache__/
+*.pyc

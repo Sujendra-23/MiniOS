@@ -1,83 +1,38 @@
-cat > isr.s <<'EOF'
-; isr.s - IDT placeholder + PIC remap + irq1 wrapper
 BITS 32
-global install_idt_and_pic, irq1_handler_asm, pic_send_eoi, isr_common_handler
-
-section .data
-idt_ptr:
-    dw 0
-    dd 0
-
-section .bss
-idt: resb 256*8
-
 section .text
-extern keyboard_handler_c
-
-install_idt_and_pic:
+extern interrupt_dispatch
+%macro ISR 1
+global isr%1
+isr%1:
+%if %1 != 8 && %1 != 10 && %1 != 11 && %1 != 12 && %1 != 13 && %1 != 14 && %1 != 17 && %1 != 21 && %1 != 29 && %1 != 30
+    push dword 0
+%endif
+    push dword %1
+    jmp interrupt_common
+%endmacro
+%assign i 0
+%rep 48
+    ISR i
+%assign i i+1
+%endrep
+interrupt_common:
     pusha
-
-    ; idt_ptr: size-1 then base
-    mov eax, idt
-    mov ebx, eax
-    add ebx, 256*8
-    dec ebx
-    mov word [idt_ptr], bx
-    mov dword [idt_ptr+2], eax
-
-    ; remap PICs (master 0x20, slave 0x28)
-    mov al, 0x11
-    out 0x20, al
-    out 0xa0, al
-
-    mov al, 0x20
-    out 0x21, al
-    mov al, 0x28
-    out 0xa1, al
-
-    mov al, 0x04
-    out 0x21, al
-    mov al, 0x02
-    out 0xa1, al
-
-    mov al, 0x01
-    out 0x21, al
-    out 0xa1, al
-
-    mov al, 0
-    out 0x21, al
-    out 0xa1, al
-
-    ; load idt
-    lea eax, [idt_ptr]
-    lidt [eax]
-
+    cld
+    mov ebx, esp
+    and esp, -16
+    sub esp, 12
+    push ebx
+    call interrupt_dispatch
+    mov esp, ebx
     popa
-    ret
-
-pic_send_eoi:
-    push ebp
-    mov ebp, esp
-    mov al, 0x20
-    out 0x20, al
-    pop ebp
-    ret
-
-; IRQ1 wrapper: push regs, call C handler, send EOI, iret
-irq1_handler_asm:
-    cli
-    pusha
-    call isr_common_handler
-    mov al, 0x20
-    out 0x20, al
-    popa
-    sti
-    iret
-
-isr_common_handler:
-    push ebp
-    mov ebp, esp
-    call keyboard_handler_c
-    pop ebp
-    ret
-EOF
+    add esp, 8
+    iretd
+section .rodata
+global isr_table
+isr_table:
+%assign i 0
+%rep 48
+    dd isr%+i
+%assign i i+1
+%endrep
+section .note.GNU-stack noalloc noexec nowrite progbits

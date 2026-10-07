@@ -1,12 +1,8 @@
-cat > keyboard.c <<'EOF'
 #include <stdint.h>
 #include "kprint.h"
+#include "paging.h"
 
-static inline uint8_t inb(uint16_t port) {
-    uint8_t ret;
-    __asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
-    return ret;
-}
+#include "io.h"
 
 static const char scmap[128] = {
   0,  27,'1','2','3','4','5','6','7','8','9','0','-','=', '\b',
@@ -16,10 +12,18 @@ static const char scmap[128] = {
   ' ',
 };
 
-extern void kprint(const char*);
-
 void keyboard_handler_c(void) {
+    static int extended;
     uint8_t sc = inb(0x60);
+    if (sc == 0xE0 || sc == 0xE1) { extended = 1; return; }
+    if (extended) { extended = 0; return; }
+    if (sc == 0x42) paging_test_null();
+    if (sc == 0x43) paging_test_readonly();
+    if (sc == 0x44) paging_test_unmapped();
+    if (sc == 0x57) {
+        __asm__ volatile ("movw $0x18, %%ax; movw %%ax, %%ds" : : : "eax");
+    }
+    if (sc == 0x58) __asm__ volatile ("ud2");
     if (sc & 0x80) {
         // key release - ignore
     } else {
@@ -31,4 +35,3 @@ void keyboard_handler_c(void) {
         }
     }
 }
-EOF

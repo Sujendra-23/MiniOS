@@ -1,29 +1,49 @@
-cat > vga.c <<'EOF'
-#include <stdint.h>
 #include "kprint.h"
-
-static uint16_t* const VGA_BUF = (uint16_t*)0xB8000;
-static int row = 0, col = 0;
-static uint8_t color = 0x0F;
-
-void kcls() {
-    for (int r=0;r<25;r++) for (int c=0;c<80;c++) VGA_BUF[r*80 + c] = ((uint16_t)color << 8) | ' ';
+#include "io.h"
+static volatile uint16_t *const vga = (volatile uint16_t *)0xB8000;
+static unsigned row, col;
+static void cell(unsigned index, char ch) { vga[index] = 0x0F00 | (uint8_t)ch; }
+void kcls(void) {
+    for (unsigned i = 0; i < 80 * 25; ++i) cell(i, ' ');
     row = col = 0;
 }
-
 void kputc(char ch) {
-    if (ch == '\n') { row++; col=0; }
-    else {
-        VGA_BUF[row*80 + col] = ((uint16_t)color << 8) | ch;
-        col++;
-        if (col >= 80) { col = 0; row++; }
+    outb(0xE9, (uint8_t)ch);
+    if (ch == '\n') { ++row; col = 0; }
+    else if (ch == '\b') {
+        if (col) { --col; cell(row * 80 + col, ' '); }
+    } else if (ch == '\t') {
+        do { cell(row * 80 + col++, ' '); } while (col % 8 && col < 80);
+    } else { cell(row * 80 + col++, ch); }
+    if (col >= 80) { col = 0; ++row; }
+    /* Reserve the bottom row for ticks. */
+    if (row >= 24) {
+        for (unsigned i = 0; i < 23 * 80; ++i) vga[i] = vga[i + 80];
+        for (unsigned i = 23 * 80; i < 24 * 80; ++i) cell(i, ' ');
+        row = 23;
     }
-    if (row >= 25) {
-        kcls();
-    }
+}
+void kprint(const char *s) { while (*s) kputc(*s++); }
+void kprint_uint(uint32_t value) {
+    char digits[10];
+    unsigned n = 0;
+    do { digits[n++] = '0' + value % 10; value /= 10; } while (value);
+    while (n) kputc(digits[--n]);
+}
+void vga_ticks(uint32_t ticks) {
+    const char *label = "PIT 100 Hz | ticks: ";
+    unsigned col = 0;
+    while (*label) cell(24 * 80 + col++, *label++);
+    char digits[10];
+    unsigned n = 0;
+    do { digits[n++] = '0' + ticks % 10; ticks /= 10; } while (ticks);
+    while (n) cell(24 * 80 + col++, digits[--n]);
+    while (col < 80) cell(24 * 80 + col++, ' ');
 }
 
-void kprint(const char* s) {
-    for (const char* p = s; *p; ++p) kputc(*p);
+void kprint_hex(uint32_t value) {
+    static const char digits[] = "0123456789abcdef";
+    kprint("0x");
+    for (int shift = 28; shift >= 0; shift -= 4)
+        kputc(digits[(value >> shift) & 0xF]);
 }
-EOF

@@ -1,0 +1,8 @@
+build
+iso
+os.iso
+.env
+.rocketride
+.git
+.claude
+__pycache__
