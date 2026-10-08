@@ -19,14 +19,78 @@ def wait_for(predicate, description, process, timeout=15):
         time.sleep(0.05)
     raise RuntimeError("Timed out waiting for " + description)
 
-def run_case(fault_key, vector, error, page_fault=None):
+def check_serial(serial_path, process):
+    """Drive the COM1 shell through a host socket: prompt, commands, and a burst."""
+    port = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    port.settimeout(5)
+    port.connect(str(serial_path))
+    received = bytearray()
+    sent = 0
+    def read_until(text, description):
+        def ready():
+            try:
+                port.setblocking(False)
+                chunk = port.recv(4096)
+                if chunk:
+                    received.extend(chunk)
+            except BlockingIOError:
+                pass
+            return text.encode() in received
+        try:
+            wait_for(ready, description, process)
+        except RuntimeError:
+            print("Serial output:", bytes(received))
+            raise
+    def run(command, expected):
+        nonlocal sent
+        received.clear()
+        port.sendall(command.encode() + b"\r")
+        sent += len(command) + 1
+        read_until(expected, "serial reply to " + repr(command))
+        return received.decode("latin1")
+    try:
+        # The banner may predate the connection; a bare Enter re-prints the prompt.
+        port.sendall(b"\r")
+        sent += 1
+        read_until("minios> ", "serial prompt")
+        assert "uptime, sched, mem, uart" in run("help", "minios> ")
+        reply = run("uptime", "minios> ")
+        assert re.search(r"uptime: [0-9]+s ticks=[1-9][0-9]*", reply), reply
+        reply = run("sched", "minios> ")
+        assert re.search(r"sched: task=0 switches=[1-9][0-9]* workers=[1-9][0-9]*,[1-9][0-9]*,[1-9][0-9]*", reply), reply
+        reply = run("mem", "minios> ")
+        assert re.search(r"mem: free_frames=[1-9][0-9]*", reply), reply
+        # 205 bytes in one write: far beyond the 16-byte FIFO, so IRQ4 must
+        # keep moving bytes into the RX ring while task 0 is descheduled.
+        payload = "".join(chr(ord("a") + i % 26) for i in range(200))
+        reply = run("echo " + payload, payload + "\r\nminios> ")
+        assert payload + "\r\n" in reply, "Burst lost or reordered"
+        # Backspace editing: "echx" + DEL + "o hi" runs "echo hi".
+        reply = run("echx\x7fo hi", "minios> ")
+        assert "\r\nhi\r\n" in reply, reply
+        assert "unknown command: nope" in run("nope", "minios> ")
+        reply = run("uart", "minios> ")
+        match = re.search(r"uart: irqs=(\d+) rx=(\d+) tx=(\d+) rx_dropped=(\d+) overruns=(\d+)", reply)
+        assert match, reply
+        irqs, rx, tx, dropped, overruns = map(int, match.groups())
+        # Every byte the host sent must have been received by the IRQ handler.
+        assert irqs > 0 and rx == sent and tx > rx, f"sent={sent}: {reply}"
+        assert dropped == 0 and overruns == 0, "Serial bytes lost: " + reply
+        return f"serial shell (irqs={irqs} rx={rx} tx={tx})"
+    finally:
+        port.close()
+
+def run_case(fault_key, vector, error, page_fault=None, serial=False):
     with tempfile.TemporaryDirectory(prefix="minios-") as directory:
         root = pathlib.Path(directory)
         log = root / "debug.log"
         qmp_path = root / "qmp.sock"
+        serial_path = root / "serial.sock"
         process = subprocess.Popen([
             "qemu-system-i386", "-accel", "tcg", "-m", "32M",
-            "-cdrom", "os.iso", "-display", "none", "-serial", "none",
+            "-cdrom", "os.iso", "-display", "none",
+            "-chardev", "socket,id=com1,path=" + str(serial_path) + ",server=on,wait=off",
+            "-serial", "chardev:com1",
             "-no-reboot", "-no-shutdown", "-debugcon", "file:" + str(log),
             "-qmp", "unix:" + str(qmp_path) + ",server=on,wait=off",
         ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -58,6 +122,7 @@ def run_case(fault_key, vector, error, page_fault=None):
             wait_for(lambda: "READY:" in output(), "kernel boot", process)
             assert "PAGING:" in output(), "Paging initialization missing"
             assert "PAGING MAP TEST: PASS" in output(), "Dynamic map/unmap failed"
+            assert "SERIAL: COM1 16550" in output(), "UART not detected"
             assert re.search(r"FRAMES: free=[1-9][0-9]*", output()), "No free RAM frames"
             registers = monitor("info registers")
             match = re.search(r"CR0=([0-9a-fA-F]+)", registers)
@@ -86,6 +151,7 @@ def run_case(fault_key, vector, error, page_fault=None):
             assert "abc" in text, "Keyboard output missing from VGA"
             assert re.search(r"PIT 100 Hz \| ticks: [1-9][0-9]+", text), "No VGA ticks"
             assert re.search(r"task: [0-3] \| switches: [1-9][0-9]*", text), "No VGA scheduler status"
+            serial_result = check_serial(serial_path, process) + ", " if serial else ""
             monitor("sendkey " + fault_key)
             expected = f"EXCEPTION vector={vector} error={error} eip="
             wait_for(lambda: expected in output(), "exception diagnostic", process)
@@ -103,7 +169,7 @@ def run_case(fault_key, vector, error, page_fault=None):
             assert output() == before, "Kernel did not halt after exception"
             assert output().count("MiniOS: booting...") == 1, "Kernel rebooted"
             assert command("query-status")["status"] == "running", "CPU triple-faulted"
-            print(f"PASS: ISO boot, paging/map/unmap, preemption, PIT, keyboard, VGA, exception {vector} (error {error})")
+            print(f"PASS: ISO boot, paging/map/unmap, preemption, PIT, keyboard, VGA, {serial_result}exception {vector} (error {error})")
         except Exception:
             print(output())
             raise
@@ -121,7 +187,7 @@ def run_case(fault_key, vector, error, page_fault=None):
                 print(diagnostics)
 
 if __name__ == "__main__":
-    run_case("f12", 6, 0)   # UD2: no CPU-pushed error code.
+    run_case("f12", 6, 0, serial=True)   # UD2: no CPU-pushed error code.
     run_case("f11", 13, 24) # Invalid GDT selector: CPU-pushed error code.
     run_case("f10", 14, 0, (0x00400000, "not-present read supervisor"))
     run_case("f8", 14, 0, (0, "not-present read supervisor"))

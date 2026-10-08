@@ -5,7 +5,7 @@ AS = nasm
 GRUB_DIR ?= /usr/lib/grub/i386-pc
 CFLAGS = -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -mno-sse -mno-mmx -msoft-float -Og -g -Wall -Wextra -Werror
 LDFLAGS = -m elf_i386 -T linker.ld
-OBJS = build/boot.o build/kernel.o build/vga.o build/interrupts.o build/paging.o build/frame.o build/memory.o build/scheduler.o build/isr.o build/keyboard.o
+OBJS = build/boot.o build/kernel.o build/vga.o build/interrupts.o build/paging.o build/frame.o build/memory.o build/scheduler.o build/isr.o build/keyboard.o build/uart.o build/shell.o
 all: os.iso
 build:
 	mkdir -p build

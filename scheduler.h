@@ -16,4 +16,7 @@ struct interrupt_frame *scheduler_tick(struct interrupt_frame *frame, uint32_t t
 void scheduler_task_entry(void);
 void scheduler_record_work(void);
 uint32_t scheduler_current_task(void);
+uint32_t scheduler_switches(void);
+uint32_t scheduler_task_count(void);
+uint32_t scheduler_task_work(uint32_t task);
 #endif

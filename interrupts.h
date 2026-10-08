@@ -7,4 +7,5 @@ struct interrupt_frame {
     uint32_t vector, error, eip, cs, eflags;
 };
 void interrupts_init(void);
+uint32_t interrupts_ticks(void);
 #endif

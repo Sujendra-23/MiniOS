@@ -2,7 +2,7 @@
 
 A small 32-bit x86 kernel in freestanding C and NASM, booted by GRUB Multiboot.
 It installs its own flat GDT, handles CPU exceptions 0–31, remaps the 8259 PIC,
-and enables only PIT timer (IRQ0) and PS/2 keyboard (IRQ1) interrupts.
+and enables only PIT timer (IRQ0), PS/2 keyboard (IRQ1), and COM1 serial (IRQ4) interrupts.
 It enables 32-bit paging with 4 KiB supervisor pages: addresses below 4 MiB
 are identity-mapped, except page zero. Kernel code and constants are read-only;
 CR0 write protection enforces this in ring 0. A linker check keeps the kernel,
@@ -30,6 +30,20 @@ vector, error code, and instruction address, then halt. F10 reads the first
 unmapped address (4 MiB), F9 writes to protected kernel code, and F8 reads page
 zero. Page faults also report CR2 and decode the access type and fault cause.
 Restart QEMU after any deliberate fault.
+
+## Serial console
+
+An interrupt-driven 16550 UART driver runs COM1 at 115200 8N1. Boot detects the
+UART with a loopback self-test and checks for its 16-byte FIFOs. IRQ4 moves
+received bytes into a 256-byte ring buffer and drains a 256-byte transmit ring
+through the THR-empty interrupt, which is enabled only while output is queued.
+The driver counts IRQs, bytes, dropped bytes, and line overruns.
+
+Task 0 runs a small command shell: between interrupts it consumes the RX ring,
+echoes input, and handles Backspace. Commands: `help`, `uptime`, `sched`
+(current task, switches, worker counters), `mem` (free frames), `uart`
+(driver counters), and `echo <text>`. Use it with
+`qemu-system-i386 -cdrom os.iso -serial stdio` (or `-serial mon:stdio`).
 
 ## Build and run on Linux
 
@@ -70,7 +84,8 @@ page alignment, duplicate availability ranges, exhaustion, unique allocation,
 free/reuse, double-free rejection, address limits, and every bitmap word.
 
 `make smoke` runs those unit tests, then boots the actual GRUB ISO under QEMU
-TCG, waits for 300 timer ticks, injects PS/2 keys through QMP, reads VGA memory to confirm keyboard echo
+TCG, waits for 300 timer ticks, drives the serial shell over a host socket,
+injects PS/2 keys through QMP, reads VGA memory to confirm keyboard echo
 and the timer display, and verifies the kernel halts cleanly on exceptions.
 Five boots verify paging is enabled with write protection, exercise both
 exception stack layouts (invalid opcode and general protection), and check
@@ -80,6 +95,10 @@ also verifying timer and keyboard IRQs work with paging enabled. It checks that
 all three CPU-bound worker counters increase across scheduler snapshots and that
 context switches keep occurring. Boot also performs a dynamic page-map/write/
 read/unmap self-test and checks the allocator's free-frame count is restored.
+The serial check runs every shell command, sends a 206-byte line in one
+write (far beyond the 16-byte FIFO) and expects it echoed intact, tests
+Backspace editing, and requires the driver's received-byte counter to equal the
+bytes the host sent, with zero drops and overruns.
 QEMU debug port 0xE9 mirrors console output and emits timer progress.
 The GitHub Actions workflow uses the same Docker toolchain as the macOS
 instructions, runs the build and tests, and uploads the ISO and ELF as artifacts.

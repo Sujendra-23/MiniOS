@@ -3,6 +3,7 @@
 #include "kprint.h"
 #include "interrupts.h"
 #include "scheduler.h"
+#include "uart.h"
 struct idt_gate {
     uint16_t low, selector;
     uint8_t zero, flags;
@@ -15,7 +16,8 @@ struct idt_pointer {
 static struct idt_gate idt[256];
 extern void (*isr_table[48])(void);
 extern void keyboard_handler_c(void);
-static uint32_t ticks;
+static volatile uint32_t ticks;
+uint32_t interrupts_ticks(void) { return ticks; }
 static void idt_set_gate(unsigned vector, void (*handler)(void)) {
     uint32_t address = (uint32_t)handler;
     idt[vector] = (struct idt_gate){
@@ -45,7 +47,7 @@ void interrupts_init(void) {
     outb(0x43, 0x34);
     outb(0x40, (uint8_t)divisor);
     outb(0x40, (uint8_t)(divisor >> 8));
-    pic_write(0x21, 0xFC); /* IRQ0 and IRQ1 only */
+    pic_write(0x21, 0xEC); /* IRQ0 timer, IRQ1 keyboard, IRQ4 COM1 */
     pic_write(0xA1, 0xFF);
 }
 struct interrupt_frame *interrupt_dispatch(struct interrupt_frame *frame) {
@@ -89,6 +91,8 @@ struct interrupt_frame *interrupt_dispatch(struct interrupt_frame *frame) {
         frame = scheduler_tick(frame, ticks);
     } else if (frame->vector == 33) {
         keyboard_handler_c();
+    } else if (frame->vector == 36) {
+        uart_irq();
     }
     if (vector >= 40) outb(0xA0, 0x20);
     outb(0x20, 0x20);

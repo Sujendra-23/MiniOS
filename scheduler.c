@@ -62,6 +62,9 @@ bool scheduler_create_task(void (*entry)(void)) {
     return true;
 }
 uint32_t scheduler_current_task(void) { return current; }
+uint32_t scheduler_switches(void) { return switches; }
+uint32_t scheduler_task_count(void) { return created; }
+uint32_t scheduler_task_work(uint32_t task) { return task < created ? tasks[task].work : 0; }
 void scheduler_record_work(void) { ++tasks[current].work; }
 void scheduler_task_entry(void) {
     tasks[current].entry();
