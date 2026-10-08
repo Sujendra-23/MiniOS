@@ -29,8 +29,11 @@ test: build/frame-test
 	./build/frame-test
 smoke: test os.iso
 	python3 scripts/smoke.py
+report:
+	xsltproc -o build/smoke-report.html scripts/junit-to-html.xsl build/junit.xml
+	@echo "wrote build/smoke-report.html"
 debug: os.iso
 	qemu-system-i386 -cdrom os.iso -debugcon stdio -S -s -no-reboot -no-shutdown
 clean:
 	rm -rf build iso os.iso
-.PHONY: all run test smoke debug clean
+.PHONY: all run test smoke report debug clean

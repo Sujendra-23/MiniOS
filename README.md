@@ -100,6 +100,13 @@ write (far beyond the 16-byte FIFO) and expects it echoed intact, tests
 Backspace editing, and requires the driver's received-byte counter to equal the
 bytes the host sent, with zero drops and overruns.
 QEMU debug port 0xE9 mirrors console output and emits timer progress.
+
+`scripts/smoke.py` also writes JUnit XML (`build/junit.xml`, or `$JUNIT_XML`)
+with one test case per QEMU boot, even when a case fails, and exits non-zero on
+any failure. `make report` renders it to `build/smoke-report.html` with
+`scripts/junit-to-html.xsl` (needs `xsltproc`). CI uploads both as the
+`smoke-report` artifact and adds a pass count to the job summary. The native
+frame-allocator tests (`make test`) print to the log but are not in the XML.
 The GitHub Actions workflow uses the same Docker toolchain as the macOS
 instructions, runs the build and tests, and uploads the ISO and ELF as artifacts.
 

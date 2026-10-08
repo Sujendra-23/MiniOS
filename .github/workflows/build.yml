@@ -15,6 +15,25 @@ jobs:
         run: docker build --platform linux/amd64 -t minios-tools .
       - name: Build ISO and test allocator, preemption, paging, and IRQs
         run: docker run --rm --platform linux/amd64 -v "$GITHUB_WORKSPACE:/work" minios-tools
+      # Run even when the smoke test failed: the report is most useful then.
+      - name: Render the JUnit results as an HTML summary
+        if: always()
+        run: |
+          sudo apt-get install -y --no-install-recommends xsltproc
+          test -f build/junit.xml
+          xsltproc -o build/smoke-report.html scripts/junit-to-html.xsl build/junit.xml
+          {
+            echo '### MiniOS smoke test'
+            python3 -c "import xml.etree.ElementTree as E; s=E.parse('build/junit.xml').getroot()[0]; print(f\"{int(s.get('tests'))-int(s.get('failures'))} of {s.get('tests')} boots passed\")"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: |
+            build/smoke-report.html
+            build/junit.xml
       - uses: actions/upload-artifact@v4
         with:
           name: minios

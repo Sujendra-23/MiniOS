@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Boot the actual GRUB ISO and exercise IRQs and exception stubs via QMP."""
+import contextlib
+import datetime
+import io
 import json
+import os
 import pathlib
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 def wait_for(predicate, description, process, timeout=15):
     deadline = time.monotonic() + timeout
@@ -186,11 +192,54 @@ def run_case(fault_key, vector, error, page_fault=None, serial=False):
             if process.returncode not in (0, -15):
                 print(diagnostics)
 
-if __name__ == "__main__":
-    run_case("f12", 6, 0, serial=True)   # UD2: no CPU-pushed error code.
-    run_case("f11", 13, 24) # Invalid GDT selector: CPU-pushed error code.
-    run_case("f10", 14, 0, (0x00400000, "not-present read supervisor"))
-    run_case("f8", 14, 0, (0, "not-present read supervisor"))
+def junit_report(path, cases, elapsed):
+    """Write JUnit XML (one <testcase> per boot or test binary) for CI tooling."""
+    failures = sum(1 for c in cases if c["failure"])
+    suite = ET.Element("testsuite", name="minios-smoke", tests=str(len(cases)),
+                       failures=str(failures), errors="0", skipped="0",
+                       time=f"{elapsed:.3f}", timestamp=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    for c in cases:
+        case = ET.SubElement(suite, "testcase", classname="minios.smoke", name=c["name"], time=f"{c['time']:.3f}")
+        if c["failure"]:
+            failure = ET.SubElement(case, "failure", message=c["failure"].splitlines()[0][:200], type="AssertionError")
+            failure.text = c["failure"]
+        ET.SubElement(case, "system-out").text = c["output"]
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = ET.Element("testsuites", tests=str(len(cases)), failures=str(failures))
+    root.append(suite)
+    ET.indent(root)
+    ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+def main():
+    """Run every case; always write the report, then exit non-zero on any failure."""
+    report = os.environ.get("JUNIT_XML", "build/junit.xml")
     symbols = subprocess.check_output(["nm", "-n", "build/kernel.elf"], text=True)
     text_start = int(re.search(r"^([0-9a-fA-F]+) \w __text_start$", symbols, re.MULTILINE)[1], 16)
-    run_case("f9", 14, 3, (text_start, "protection write supervisor"))
+    plan = [
+        ("boot + serial shell + exception 6 (UD2, no error code)", lambda: run_case("f12", 6, 0, serial=True)),
+        ("exception 13 (invalid GDT selector, error code 24)", lambda: run_case("f11", 13, 24)),
+        ("page fault: unmapped read at 4 MiB", lambda: run_case("f10", 14, 0, (0x00400000, "not-present read supervisor"))),
+        ("page fault: null read", lambda: run_case("f8", 14, 0, (0, "not-present read supervisor"))),
+        ("page fault: write to protected kernel code", lambda: run_case("f9", 14, 3, (text_start, "protection write supervisor"))),
+    ]
+    cases = []
+    started = time.monotonic()
+    for name, body in plan:
+        buffer, failure = io.StringIO(), None
+        t0 = time.monotonic()
+        try:
+            with contextlib.redirect_stdout(buffer):
+                body()
+        except BaseException as error:  # a failed case must not hide the report
+            failure = f"{type(error).__name__}: {error}"
+        sys.stdout.write(buffer.getvalue())
+        if failure:
+            print("FAIL:", name, "-", failure.splitlines()[0])
+        cases.append({"name": name, "time": time.monotonic() - t0, "failure": failure, "output": buffer.getvalue()})
+    junit_report(report, cases, time.monotonic() - started)
+    print(f"JUnit report: {report} ({sum(1 for c in cases if c['failure'])} failed of {len(cases)})")
+    return 1 if any(c["failure"] for c in cases) else 0
+
+if __name__ == "__main__":
+    sys.exit(main())
