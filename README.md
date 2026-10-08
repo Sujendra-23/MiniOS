@@ -81,8 +81,8 @@ all three CPU-bound worker counters increase across scheduler snapshots and that
 context switches keep occurring. Boot also performs a dynamic page-map/write/
 read/unmap self-test and checks the allocator's free-frame count is restored.
 QEMU debug port 0xE9 mirrors console output and emits timer progress.
-The GitHub Actions workflow runs the same build and test and uploads the ISO
-and ELF as artifacts.
+The GitHub Actions workflow uses the same Docker toolchain as the macOS
+instructions, runs the build and tests, and uploads the ISO and ELF as artifacts.
 
 ## Debug with GDB
 

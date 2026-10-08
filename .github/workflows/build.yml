@@ -11,14 +11,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install build and emulator tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib make nasm grub-pc-bin grub-common xorriso qemu-system-x86 python3
-      - name: Build GRUB ISO
-        run: make
-      - name: Test allocator, preemption, paging, IRQs, and exceptions
-        run: make smoke
+      - name: Build the Linux toolchain
+        run: docker build --platform linux/amd64 -t minios-tools .
+      - name: Build ISO and test allocator, preemption, paging, and IRQs
+        run: docker run --rm --platform linux/amd64 -v "$GITHUB_WORKSPACE:/work" minios-tools
       - uses: actions/upload-artifact@v4
         with:
           name: minios
