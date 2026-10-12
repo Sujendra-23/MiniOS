@@ -5,7 +5,7 @@ AS = nasm
 GRUB_DIR ?= /usr/lib/grub/i386-pc
 CFLAGS = -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -mno-sse -mno-mmx -msoft-float -Og -g -Wall -Wextra -Werror
 LDFLAGS = -m elf_i386 -T linker.ld
-OBJS = build/boot.o build/kernel.o build/vga.o build/interrupts.o build/paging.o build/frame.o build/memory.o build/scheduler.o build/isr.o build/keyboard.o build/uart.o build/shell.o
+OBJS = build/boot.o build/kernel.o build/vga.o build/interrupts.o build/paging.o build/frame.o build/memory.o build/scheduler.o build/isr.o build/keyboard.o build/uart.o build/shell.o build/pci.o build/can_frame.o build/can.o build/net_proto.o build/rtl8139.o build/net.o build/rt.o
 all: os.iso
 build:
 	mkdir -p build
@@ -25,8 +25,14 @@ run: os.iso
 	qemu-system-i386 -cdrom os.iso -debugcon stdio -no-reboot -no-shutdown
 build/frame-test: tests/frame_test.c frame.c frame.h Makefile | build
 	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I. frame.c tests/frame_test.c -o $@
-test: build/frame-test
+build/net-test: tests/net_test.c net_proto.c net_proto.h Makefile | build
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I. net_proto.c tests/net_test.c -o $@
+build/can-test: tests/can_test.c can_frame.c can_frame.h Makefile | build
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I. can_frame.c tests/can_test.c -o $@
+test: build/frame-test build/net-test build/can-test
 	./build/frame-test
+	./build/net-test
+	./build/can-test
 smoke: test os.iso
 	python3 scripts/smoke.py
 report:

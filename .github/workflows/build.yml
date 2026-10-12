@@ -20,6 +20,8 @@ jobs:
         if: always()
         run: |
           sudo apt-get install -y --no-install-recommends xsltproc
+          # build/ was created by root inside the container; let xsltproc write the report.
+          sudo chown -R "$(id -u):$(id -g)" build
           test -f build/junit.xml
           xsltproc -o build/smoke-report.html scripts/junit-to-html.xsl build/junit.xml
           {

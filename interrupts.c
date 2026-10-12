@@ -43,7 +43,7 @@ void interrupts_init(void) {
     pic_write(0x21, 0x01);
     pic_write(0xA1, 0x01);
     /* PIT channel 0, mode 2, approximately 100 Hz. */
-    uint16_t divisor = 1193182 / 100;
+    uint16_t divisor = PIT_DIVISOR;
     outb(0x43, 0x34);
     outb(0x40, (uint8_t)divisor);
     outb(0x40, (uint8_t)(divisor >> 8));
